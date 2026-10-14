@@ -6,9 +6,7 @@
 [![Stars](https://img.shields.io/github/stars/cloudera-applied-ai/AI_Blueprint_Agentic_Gateway?logo=github&cacheSeconds=300)](https://github.com/cloudera-applied-ai/AI_Blueprint_Agentic_Gateway/stargazers)
 [![Forks](https://img.shields.io/github/forks/cloudera-applied-ai/AI_Blueprint_Agentic_Gateway?logo=github&cacheSeconds=300)](https://github.com/cloudera-applied-ai/AI_Blueprint_Agentic_Gateway/network/members)
 
-> **Agent governance** for [Cloudera Data Platform](https://www.cloudera.com/). Third-party agents present [Apache Knox](https://knox.apache.org/) JWTs at a north-south gateway. They never talk to Livy, HiveServer2, Impala, Ozone, or NiFi hostnames. Ranger stays authorization. Catalog fields live in [`METADATA.yaml`](METADATA.yaml).
-
-This repo follows the [Cloudera Blueprints Standard](https://github.com/kevinbtalbert/Cloudera-Blueprints-Standard). After reading this page you should know what the blueprint does, who it is for, and how to run the local demo.
+> **Agent governance** for [Cloudera Data Platform](https://www.cloudera.com/). Third-party agents present [Apache Knox](https://knox.apache.org/) JWTs at a north-south gateway. They never talk to Livy, HiveServer2, Impala, Ozone, or NiFi hostnames. Ranger stays authorization. 
 
 ![CDP Agent Gateway catalog cover](images/AMP_thumbnail.jpg)
 
