@@ -1,0 +1,364 @@
+name: CDP Agent Gateway
+description: >-
+  Agent governance on Cloudera AI Workbench. MCP hosts send Knox JWTs; adapters
+  forward the same bearer to Knox. Spark MCP and read-only Hive and Impala MCP are
+  published. Ranger authorizes the token subject. Operator quotas and audit stay in
+  the workbench. This is not Docker Compose and does not replace Apache Knox.
+author: Cloudera
+specification_version: "1.0"
+prototype_version: "1.0.0"
+date: "2026-09-10"
+
+environment_variables:
+  KNOX_PROXY_URL:
+    default: "https://knox.invalid/gateway/cdp-proxy-token/livy_for_spark3/"
+    description: "HTTPS Livy-for-Spark-3 URL. Leave this placeholder to fill Project Settings from inventory/cdp.yaml when the project launches. Type a URL to override."
+    required: true
+  ENABLE_MCP_SPARK:
+    default: "true"
+    description: "Enable Spark MCP (true/false). AMP still starts the app slot; agent-gateway only serves enabled adapters."
+    required: false
+  ENABLE_MCP_HIVE:
+    default: "true"
+    description: "Enable Hive MCP (true/false). AMP still starts the app slot; agent-gateway only serves enabled adapters."
+    required: false
+  ENABLE_MCP_IMPALA:
+    default: "false"
+    description: "Enable Impala MCP (true/false). Default false. AMP still starts the app slot; agent-gateway only serves enabled adapters."
+    required: false
+  KNOX_JWKS_URL:
+    default: ""
+    description: "Knox JWKS URL. Leave empty to fill from inventory/cdp.yaml at launch. Host must match KNOX_PROXY_URL when you set both."
+    required: false
+  KNOX_ISSUER:
+    default: "KNOXSSO"
+    description: "Expected JWT iss claim."
+    required: false
+  KNOX_EXPECTED_ALG:
+    default: "RS256"
+    description: "Expected JWT alg. Anything else is rejected."
+    required: false
+  KNOX_CLOCK_SKEW:
+    default: "60"
+    description: "Seconds of leeway for exp and nbf."
+    required: false
+  UPSTREAM_TLS_VERIFY:
+    default: "false"
+    description: "Verify TLS when fetching JWKS and calling Knox. false for lab CAs; true for public CAs."
+    required: false
+  MCP_RATE_COUNT:
+    default: "60"
+    description: "Burst cap on MCP POSTs per Knox sub."
+    required: false
+  MCP_RATE_WINDOW:
+    default: "60"
+    description: "Burst window in seconds."
+    required: false
+  IMPALA_HOST:
+    default: ""
+    description: "Optional CDW Impala coordinator hostname from jdbc:impala://. Leave empty to use Knox {prefix}/impala."
+    required: false
+  IMPALA_PORT:
+    default: "443"
+    description: "CDW Impala HS2 HTTP port (usually 443)."
+    required: false
+  IMPALA_SCHEME:
+    default: "https"
+    description: "CDW Impala HTTP scheme."
+    required: false
+  IMPALA_HTTP_PATH:
+    default: "cliservice"
+    description: "CDW Impala HS2 httpPath. Ignored when IMPALA_HOST is empty."
+    required: false
+  IMPALA_TLS_VERIFY:
+    default: "true"
+    description: "Verify TLS to the CDW Impala coordinator. Set false only for lab CAs."
+    required: false
+  AGENT_CALLER_KEY:
+    default: ""
+    description: "Optional partner MCP caller key (X-Agent-Key) enforced by APISIX on /mcp/*."
+    required: false
+  GATEWAY_PUBLIC_URL:
+    default: ""
+    description: "Optional public agent URL for RFC 9728. Leave empty to use https://cdp-ag.<CDSW_DOMAIN>."
+    required: false
+
+runtimes:
+  - editor: Workbench
+    kernel: Python 3.12
+    edition: Standard
+  - editor: PBJ Workbench
+    kernel: Python 3.12
+    edition: Standard
+  - editor: Workbench
+    kernel: Python 3.11
+    edition: Standard
+  - editor: JupyterLab
+    kernel: Python 3.11
+    edition: Standard
+  - editor: PBJ Workbench
+    kernel: Python 3.11
+    edition: Standard
+
+tasks:
+  - type: run_session
+    name: Install dependencies
+    entity_label: install_deps
+    script: 0_session-install-dependencies/install_dependencies.py
+    kernel: python3
+    runtimes:
+      - editor: Workbench
+        kernel: Python 3.12
+        edition: Standard
+      - editor: PBJ Workbench
+        kernel: Python 3.12
+        edition: Standard
+      - editor: Workbench
+        kernel: Python 3.11
+        edition: Standard
+      - editor: JupyterLab
+        kernel: Python 3.11
+        edition: Standard
+      - editor: PBJ Workbench
+        kernel: Python 3.11
+        edition: Standard
+    cpu: 1.0
+    memory: 2.0
+    gpu: 0
+    short_summary: Install AMP extras into the project user site so applications can import them.
+
+  - type: create_job
+    name: Fetch pinned Knox JWKS
+    entity_label: fetch_jwks
+    script: 1_job-fetch-jwks/fetch_jwks.py
+    arguments: None
+    kernel: python3
+    runtimes:
+      - editor: Workbench
+        kernel: Python 3.12
+        edition: Standard
+      - editor: PBJ Workbench
+        kernel: Python 3.12
+        edition: Standard
+      - editor: Workbench
+        kernel: Python 3.11
+        edition: Standard
+      - editor: JupyterLab
+        kernel: Python 3.11
+        edition: Standard
+      - editor: PBJ Workbench
+        kernel: Python 3.11
+        edition: Standard
+    cpu: 1.0
+    memory: 1.0
+    gpu: 0
+    timeout: 10
+    short_summary: Create the job that downloads JWKS from the Knox host and writes the verifying PEM.
+    environment:
+      TASK_TYPE: CREATE/RUN_JOB
+
+  - type: run_job
+    entity_label: fetch_jwks
+    short_summary: Run Fetch pinned Knox JWKS.
+    long_summary: Pins JWKS using KNOX_PROXY_URL. Launch copies inventory/cdp.yaml into project settings when the form still has the placeholder. Refuses a foreign jku host.
+
+  - type: create_job
+    name: Smoke-check Knox
+    entity_label: smoke_knox
+    script: 2_job-smoke-knox/smoke_knox.py
+    arguments: None
+    kernel: python3
+    runtimes:
+      - editor: Workbench
+        kernel: Python 3.12
+        edition: Standard
+      - editor: PBJ Workbench
+        kernel: Python 3.12
+        edition: Standard
+      - editor: Workbench
+        kernel: Python 3.11
+        edition: Standard
+      - editor: JupyterLab
+        kernel: Python 3.11
+        edition: Standard
+      - editor: PBJ Workbench
+        kernel: Python 3.11
+        edition: Standard
+    cpu: 1.0
+    memory: 1.0
+    gpu: 0
+    timeout: 10
+    short_summary: Create the job that confirms the PEM exists and JWKS is reachable.
+    environment:
+      TASK_TYPE: CREATE/RUN_JOB
+
+  - type: run_job
+    entity_label: smoke_knox
+    short_summary: Run Smoke-check Knox.
+    long_summary: Reachability check after Fetch JWKS. Never prints the bearer.
+
+  - type: start_application
+    name: Spark MCP
+    entity_label: spark-mcp
+    subdomain: cdp-ag-spark
+    script: 3_app-mcp-spark/mcp_spark_app.py
+    kernel: python3
+    runtimes:
+      - editor: Workbench
+        kernel: Python 3.12
+        edition: Standard
+      - editor: PBJ Workbench
+        kernel: Python 3.12
+        edition: Standard
+      - editor: Workbench
+        kernel: Python 3.11
+        edition: Standard
+      - editor: JupyterLab
+        kernel: Python 3.11
+        edition: Standard
+      - editor: PBJ Workbench
+        kernel: Python 3.11
+        edition: Standard
+    cpu: 1.0
+    memory: 1.0
+    gpu: 0
+    bypass_authentication: true
+    static_subdomain: true
+    short_summary: MCP JSON-RPC for Livy Spark 3. Requires Knox JWT. CML session cookies are not the user credential.
+    description: Spark MCP for agents. Validates Knox RS256 and forwards the same bearer to Knox.
+    long_summary: >-
+      Public to MCP hosts so Cursor can send Authorization Bearer. The application
+      validates Knox RS256 (iss, exp, sub) against the pinned PEM, then forwards
+      the same bearer to Knox. Do not paste tokens into git or project files.
+
+  - type: start_application
+    name: Hive MCP
+    entity_label: hive-mcp
+    subdomain: cdp-ag-hive
+    script: 5_app-mcp-hive/mcp_hive_app.py
+    kernel: python3
+    runtimes:
+      - editor: Workbench
+        kernel: Python 3.12
+        edition: Standard
+      - editor: PBJ Workbench
+        kernel: Python 3.12
+        edition: Standard
+      - editor: Workbench
+        kernel: Python 3.11
+        edition: Standard
+      - editor: JupyterLab
+        kernel: Python 3.11
+        edition: Standard
+      - editor: PBJ Workbench
+        kernel: Python 3.11
+        edition: Standard
+    cpu: 1.0
+    memory: 1.0
+    gpu: 0
+    bypass_authentication: true
+    static_subdomain: true
+    short_summary: Read-only Hive MCP JSON-RPC. Requires Knox JWT. /cdp/hive stays unpublished.
+    description: Read-only Hive MCP. Ranger authorizes the Knox token subject.
+    long_summary: >-
+      Lists databases/tables, describe, and column SELECT (limit 50, no SELECT *)
+      as the Knox token subject. Ranger authorizes that subject. CML cookies are
+      not the user credential.
+
+  - type: start_application
+    name: Impala MCP
+    entity_label: impala-mcp
+    subdomain: cdp-ag-impala
+    script: 6_app-mcp-impala/mcp_impala_app.py
+    kernel: python3
+    runtimes:
+      - editor: Workbench
+        kernel: Python 3.12
+        edition: Standard
+      - editor: PBJ Workbench
+        kernel: Python 3.12
+        edition: Standard
+      - editor: Workbench
+        kernel: Python 3.11
+        edition: Standard
+      - editor: JupyterLab
+        kernel: Python 3.11
+        edition: Standard
+      - editor: PBJ Workbench
+        kernel: Python 3.11
+        edition: Standard
+    cpu: 1.0
+    memory: 1.0
+    gpu: 0
+    bypass_authentication: true
+    static_subdomain: true
+    short_summary: Read-only Impala MCP JSON-RPC. Requires Knox JWT. /cdp/impala stays unpublished.
+    description: Read-only Impala MCP. Ranger authorizes the Knox token subject.
+    long_summary: >-
+      Lists databases/tables, describe, and column SELECT (limit 50, no SELECT *)
+      as the Knox token subject. Ranger authorizes that subject. CML cookies are
+      not the user credential.
+
+  - type: start_application
+    name: Operator admin
+    entity_label: gateway-admin
+    subdomain: cdp-ag-admin
+    script: 4_app-operator-admin/operator_admin_app.py
+    kernel: python3
+    runtimes:
+      - editor: Workbench
+        kernel: Python 3.12
+        edition: Standard
+      - editor: PBJ Workbench
+        kernel: Python 3.12
+        edition: Standard
+      - editor: Workbench
+        kernel: Python 3.11
+        edition: Standard
+      - editor: JupyterLab
+        kernel: Python 3.11
+        edition: Standard
+      - editor: PBJ Workbench
+        kernel: Python 3.11
+        edition: Standard
+    cpu: 1.0
+    memory: 1.0
+    gpu: 0
+    bypass_authentication: false
+    static_subdomain: true
+    short_summary: Usage and quotas for operators. CML login required. Not an MCP route.
+    description: "Agent governance console: usage, quotas, and audit join. CML login required. Not an MCP route."
+
+  - type: start_application
+    name: Agent gateway (APISIX)
+    entity_label: agent-gateway
+    subdomain: cdp-ag
+    script: 7_app-agent-gateway/agent_gateway_app.py
+    kernel: python3
+    runtimes:
+      - editor: Workbench
+        kernel: Python 3.12
+        edition: Standard
+      - editor: PBJ Workbench
+        kernel: Python 3.12
+        edition: Standard
+      - editor: Workbench
+        kernel: Python 3.11
+        edition: Standard
+      - editor: JupyterLab
+        kernel: Python 3.11
+        edition: Standard
+      - editor: PBJ Workbench
+        kernel: Python 3.11
+        edition: Standard
+    cpu: 1.0
+    memory: 1.5
+    gpu: 0
+    bypass_authentication: true
+    static_subdomain: true
+    short_summary: APISIX agent edge with knox-jwt.lua. Same routes as Compose on live Knox.
+    description: "Agent governance edge: public MCP and /cdp/* allowlist through Apache APISIX."
+    long_summary: >-
+      Runs the same apache/apisix image as Compose, bound to CDSW_APP_PORT. Validates Knox
+      RS256 with the pinned PEM, enforces optional X-Agent-Key on MCP, and proxies to the
+      sibling MCP applications. Requires docker on the engine and Fetch JWKS before start.

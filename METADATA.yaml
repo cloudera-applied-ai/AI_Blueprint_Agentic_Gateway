@@ -1,0 +1,59 @@
+# Cloudera Blueprint catalog metadata
+# Populate fields used by the master blueprint website and internal catalog.
+# Schema: https://github.com/kevinbtalbert/Cloudera-Blueprints-Standard
+
+# --- Identity ---
+name: "CDP Agent Gateway"
+slug: "cdp-agent-gateway" # URL-safe repo / catalog identifier
+description: "Agent governance for Cloudera Data Platform: third-party MCP hosts present Knox JWTs; Ranger authorizes the token subject. Spark MCP plus read-only Hive and Impala MCP are published with RFC 9728 metadata, caller keys, quotas, and audit join. Operators stage HDFS files at /cdp/webhdfs; /cdp/hive and /cdp/impala stay 404."
+reprise_link: "" # Public reprise link — add when the demo recording is published
+
+# --- Classification (website filters) ---
+catalog_classification:
+  - Enterprise Blueprint # Options: Enterprise Blueprint | Research | Launchable (AMP) | Developer Example
+launchable: false # true | false — AMP packaging exists; wait for a workbench proof before flipping
+lifecycle_status: Active # e.g., Active | Deprecated
+
+# --- Industry & alignment ---
+industry: General # e.g., General | Telecom | Financial Services | Healthcare & Life Sciences | Retail | Media | Physical AI & Robotics
+industry_alignment: "Horizontal" # Horizontal | Vertical
+target_vertical: "" # Optional finer-grained vertical
+
+# --- Tags (website search & browse) ---
+tags:
+  - agents
+  - agent-governance
+  - mcp
+  - spark
+  - livy
+  - hive
+  - impala
+  - apache-knox
+  - apache-apisix
+  - gateway
+  - ranger
+  - cdp
+  - amp
+
+# --- Relationships ---
+product_mapping: # Cloudera products used
+  - Cloudera Data Platform
+  - Cloudera Data Engineering
+  - Cloudera Data Warehouse
+# model_dependencies: # Models, embeddings, or external AI services, if any. Comment out if none.
+
+# --- Provenance ---
+publisher: cloudera # cloudera | partner-name
+source: Internal # Internal | Partner | NVIDIA Adaptation | Customer
+
+# --- Repository & images ---
+public_github_link: "https://github.com/cloudera-applied-ai/AI_Blueprint_Agentic_Gateway"
+#private_github_link: "" # If applicable, original repo during development
+
+# --- Ownership ---
+maintainer_name: "" # Catalog owner — fill before publish
+
+# --- Dates ---
+date_created: "2026-08-17"
+date_updated: "2026-09-10"
+published_date: "2026-09-10" # Published date / last modified

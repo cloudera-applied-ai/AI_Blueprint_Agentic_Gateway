@@ -1,0 +1,124 @@
+# Test cases
+
+Phase 0 defines cases. Phases 1–3 execute them against **local APISIX** (mock Knox or live Knox). Mark live results in the table at the bottom; do not commit tokens.
+
+Assumptions:
+
+- `GATEWAY_URL` is `http://127.0.0.1:9080` unless `APISIX_PORT` is changed
+- Live Knox URL is set with `gateway knox <https-url>`
+- Hive JDBC (optional) is stored with `gateway jdbc add <jdbc:hive2://…>`. Agents use `/mcp/hive`; `/cdp/hive` stays 404
+- Impala agents use `/mcp/impala`; `/cdp/impala` stays 404. Inventory CDW JDBC with `gateway jdbc add <jdbc:impala://…>`. Operator probe is `gateway impala`
+- `KNOX_TOKEN` is a Knox JWT in `.env` (`gateway token set`), never in git. `--mint` is lab-only (`GATEWAY_MODE=local`). Live pytest reads those keys from `.env` via `load_env()`; you do not have to export them in the shell.
+- Phase 1 probe is `GET /cdp/livy_for_spark3/sessions`
+- WebHDFS staging is `GET`/`PUT` `/cdp/webhdfs/v1/...` (`gateway webhdfs`)
+
+## How to run
+
+```bash
+gateway test --unit          # inventory, CLI, blueprint, AMP packaging (no Docker)
+gateway test                 # mock-cdp overlay (does not rewrite `.env`), Compose, pytest -m "not live"
+gateway test --live          # requires GATEWAY_MODE=live and KNOX_TOKEN; leaves that stack running
+```
+
+`make test` / `make test-unit` / `make live` call the same CLI.
+
+## Phase 0 — fixtures
+
+| ID | Case | Expected | Automated |
+| --- | --- | --- | --- |
+| P0-01 | Inventory has Knox fields and a read-only first tool | `inventory/cdp.yaml` schema; worksheet in [phase-0-inventory.md](phase-0-inventory.md) | `tests/test_phase0_inventory.py` |
+| P0-02 | Laptop can resolve and connect to Knox | TLS handshake to live Knox | `gateway doctor`; live only |
+| P0-03 | JWKS fetches from the pinned host | `GET` JWKS returns keys; host matches `UPSTREAM_HOST` | `gateway fetch-jwks`; `trusted_jku` in `tests/test_knox_url.py` |
+| P0-04 | Operator can mint or paste a JWT | `iss=KNOXSSO`, `alg=RS256`, `sub`, `exp` | `gateway token mint` (mock); `gateway token show` (live) |
+| P0-05 | Probe user is allowed by Ranger for Livy Spark 3 | Direct Knox or gateway `GET .../sessions` succeeds | `tests/test_live_cdp.py` |
+| P0-06 | `.env` is gitignored | `git check-ignore .env` is true | `.gitignore` |
+| P0-07 | Hive JDBC `cdp-proxy-api` is stored without replacing Livy | `HIVE_KNOX_PREFIX` set; `KNOX_PROXY_PREFIX` unchanged | `tests/test_knox_url.py` |
+| P0-08 | Hive JWT probe uses token topology `/hive` | `gateway hive` → `SHOW DATABASES`; not `/cdp/hive` | `tests/test_hive.py` |
+
+## Phase 1 — gateway perimeter
+
+Against mock CDP unless noted. Spark URI is `/cdp/livy_for_spark3/sessions`.
+
+| ID | Case | Expected | Automated |
+| --- | --- | --- | --- |
+| P1-01 | Missing `Authorization` | `401`, `reason=missing_token`, `WWW-Authenticate: Bearer` | `tests/test_gateway_auth.py` |
+| P1-02 | Malformed bearer | `401`; no upstream Livy body | same |
+| P1-03 | Valid Knox-shaped JWT + sessions path | `2xx`; `Authorization` forwarded; `knox_user` matches `sub` | `tests/test_gateway_auth.py`, `tests/test_gateway_proxy.py` |
+| P1-04 | Expired JWT | `401` `expired` | `tests/test_gateway_auth.py` |
+| P1-05 | Wrong `iss`, `alg=none`, or HS256 confusion | `401` | `tests/test_gateway_auth.py` |
+| P1-06 | Valid JWT, path outside Spark/WebHDFS allowlist (`/cdp/hive`, `/cdp/impala`) | `404` | `tests/test_gateway_proxy.py` |
+| P1-07 | Request ID present | `X-Request-Id` on `/health` and Spark routes | `tests/test_gateway_auth.py`, `tests/test_gateway_proxy.py` |
+| P1-08 | Auth failure reason is visible | `X-Agent-Gateway-Reason` / JSON `reason`; **no raw token** | `tests/test_gateway_auth.py` |
+| P1-09 | Auth success binds the user | `X-Knox-User` and `X-Knox-Token-Id` forwarded upstream | mock CDP echoes `knox_user` / `token_id` |
+| P1-10 | JWKS host pinning | Token `jku` on a foreign host is refused by the CLI | `tests/test_knox_url.py` (not the Lua plugin) |
+| P1-14 | WebHDFS LISTSTATUS through the gateway | Authenticated `GET /cdp/webhdfs/v1/` → `2xx`; missing bearer `401` | `tests/test_gateway_proxy.py` |
+| P1-15 | WebHDFS PUT MKDIRS through the gateway | Authenticated `PUT ...?op=MKDIRS` → `2xx`; `DELETE` → `404`/`405` | `tests/test_gateway_proxy.py` |
+| P1-16 | CREATE Location host pin | Foreign `Location` host refused; Knox host rewritten to `/cdp/webhdfs` | `tests/test_webhdfs.py` |
+
+## Phase 1 — CDP still behind Knox
+
+| ID | Case | Expected | Automated |
+| --- | --- | --- | --- |
+| P1-11 | Ranger deny user through gateway | CDP/Knox denies; gateway does not override | live only; not a dedicated deny fixture yet |
+| P1-12 | Gateway does not mint credentials | Upstream sees the caller bearer (`hide_credentials: false`) | mock asserts `authorization_present` |
+| P1-13 | Direct Knox from untrusted network | Blocked by CDP perimeter | Manual; record how the cluster enforces it |
+
+## Phase 2 — Spark MCP
+
+| ID | Case | Expected | Automated |
+| --- | --- | --- | --- |
+| P2-01 | MCP `tools/list` through APISIX | `200`; Spark tools listed including `spark_submit_batch` | `tests/test_mcp_spark.py` |
+| P2-02 | MCP without bearer | `401` | `tests/test_mcp_spark.py` |
+| P2-03 | `spark_list_batches` forwards `sub` | JSON result includes `knox_user`; no raw token | `tests/test_mcp_spark.py` |
+| P2-04 | Audit record joins tool, `sub`, `knox.id` | `GET /api/audit?request_id=` returns those fields; no bearer | `tests/test_admin_store.py`, `tests/test_admin_gateway.py` |
+| P2-05 | Hive MCP through APISIX | `tools/list` + `hive_list_databases`; `/cdp/hive` still 404 | `tests/test_mcp_hive.py` |
+| P2-16 | Impala MCP through APISIX | `tools/list` + `impala_list_databases`; `/cdp/impala` still 404 | `tests/test_mcp_impala.py`; live `tests/test_live_cdp.py` |
+| P2-17 | Impala HS2 errors map without leaking secrets | Coordinator `HTTP code 401` → tool `status` 401; privileges/`403` → 403; impyla `close` bug → 502 without `NoneType` or Bearer | `tests/test_impala_hs2.py` |
+| P2-06 | Raw Livy writes on the agent listener | Authenticated `POST .../sessions/0/statements`, `POST .../batches`, `PUT`, `DELETE` → `404` or `405` | `tests/test_gateway_proxy.py` |
+| P2-07 | `spark_submit_batch` accepts cluster file URI | HDFS (or other allowlisted scheme) submit `isError=false`; `submitted=true` | `tests/test_mcp_spark.py` |
+| P2-08 | `spark_submit_batch` rejects remote HTTP file | `isError=true`; error names HDFS/object-store | `tests/test_mcp_spark.py` |
+| P2-09 | `spark_submit_batch` rejects `proxyUser` | `isError=true`; does not impersonate | `tests/test_mcp_spark.py`, `tests/test_mcpspark_livy.py` |
+| P2-10 | `spark_submit_batch` rejects inline `code` | `isError=true`; file URI required | `tests/test_mcp_spark.py`, `tests/test_mcpspark_livy.py` |
+| P2-11 | Operator admin UI on `:9090` | `GET /health` 200; `GET /admin` on APISIX is 404 | `tests/test_admin_gateway.py` |
+| P2-12 | Per-user submit quota | `daily_submits=0` → admin admit `429`; MCP `isError` when mock PEM is in use | `tests/test_admin_gateway.py`, `tests/test_admin_store.py` |
+| P2-13 | MCP burst rate limit | Authenticated `/mcp/spark`, `/mcp/hive`, or `/mcp/impala` returns `429` after `MCP_RATE_COUNT` per Knox `sub`; Livy GET is not capped | `tests/test_gateway_ratelimit.py`, `tests/test_apisix_render.py` |
+| P2-14 | `--mint` on a live stack | CLI exit 2; no POST; message names Knox JWKS / `invalid_signature` | `tests/test_cli.py` |
+| P2-15 | Live Spark `count_to_10` then Hive select `{sub}.count_to_10` | `spark_submit_batch` reaches `state=success`; `hive_select` returns `n` 1..10; `/cdp/hive` 404 | CLI submit + `tests/test_live_cdp.py` |
+
+## Optional AMP (not catalog-launchable yet)
+
+Python Knox JWT and CML packaging. Compose tests above stay the source of truth for APISIX.
+
+| ID | Case | Expected | Automated |
+| --- | --- | --- | --- |
+| AMP-01 | AMP metadata present; `launchable` false | `.project-metadata.yaml` tasks; install is `run_session`; `KNOX_PROXY_URL` required with non-empty `knox.invalid` placeholder (Configure Project form); launch copies `inventory/cdp.yaml` into project settings; `ENABLE_MCP_SPARK`/`HIVE` default `true`, `ENABLE_MCP_IMPALA` default `false`; `create_job`+`run_job` for JWKS and smoke; jobs before MCP apps; APISIX last; no `KNOX_TOKEN` project env; mcp-spark bypasses CML login; admin does not | `tests/test_amp_packaging.py`, `tests/test_project_knox.py` |
+| AMP-02 | Python knox-jwt fail-closed | `missing_token`, `invalid_alg`, `expired`, `invalid_issuer` | `tests/test_knox_jwt.py` |
+| AMP-03 | AMP MCP GET `/health` public; POST without JWT `401` | Valid token `tools/list`; no raw bearer in body; Spark `/` and `/health` include `knox_livy_url`; Python edge `/health` includes `mcp_urls.spark` | `tests/test_amp_mcp.py`, `tests/test_amp_apisix.py` |
+| AMP-04 | JWKS host pin on AMP fetch | Foreign `jku` host refused before download | `tests/test_knox_jwt.py` |
+| AMP-05 | Workbench import against live Knox | MCP `tools/list` through the CML app HTTPS URL; optional [`examples/agent/third_party_agent.ipynb`](../examples/agent/third_party_agent.ipynb) or LangGraph [`examples/agent/langgraph_agent.ipynb`](../examples/agent/langgraph_agent.ipynb); paste Knox JWT in the notebook (`getpass`). Do not put `KNOX_TOKEN` or model API keys in project env | Manual; record below without tokens |
+
+## Phase 3 — Third-party ready
+
+| ID | Case | Expected | Automated |
+| --- | --- | --- | --- |
+| P3-01 | `401` includes RFC 9728 resource metadata | `WWW-Authenticate` has `resource_metadata=`; `GET /.well-known/oauth-protected-resource` is public JSON | `tests/test_gateway_auth.py`, `tests/test_amp_mcp.py`, `tests/test_knox_jwt.py` |
+| P3-02 | Revoked-but-unexpired Knox token is rejected | Managed JWT with `knox.id` disabled at token-state → `401` `revoked`; foreign token-state host refused | `tests/test_knox_jwt.py`; APISIX `tests/test_gateway_auth.py` (mock-cdp) |
+| P3-03 | Partner without caller key is rejected | Valid Knox JWT on `/mcp/spark` without `X-Agent-Key` → `401`; Livy GET still `200` | `tests/test_mcp_spark.py`, `tests/test_apisix_render.py` |
+| P3-04 | Spark logs redact JWT-shaped secrets | `spark_get_log` / `truncate_log` replaces `eyJ…` and `Bearer …` with `[redacted]` | `tests/test_mcpspark_livy.py` |
+
+## Later phases (do not implement yet)
+
+| ID | Case | Phase |
+| --- | --- | --- |
+| — | Streamable HTTP / GET SSE / MCP session | Held; POST JSON-RPC is the `/mcp/spark`, `/mcp/hive`, and `/mcp/impala` contract |
+| P3-05 | MCP OAuth PKCE broker exchanges into a Knox JWT | 3 (IdP) |
+| P3-06 | Partner without mTLS is rejected on TLS listener | 3 (after HTTPS) |
+
+## Results log
+
+Copy a row per live run. Keep this table free of secrets.
+
+| Date | IDs run | Environment | Pass / fail | Notes |
+| --- | --- | --- | --- | --- |
+| 2026-08-17 | P3-01, P3-02, P3-03, P3-04 (plus Phase 0–2 mock suite) | Local Compose mock-cdp; APISIX `:9080` | pass | `pytest -m "not live"` 147 passed. PRM public; `401` has `resource_metadata`; revoked `knox.id=revoked-token-id` → `401 revoked`; MCP without `X-Agent-Key` → 401, Livy GET still 200; Spark logs redact `eyJ` / `Bearer`. `gateway test` overlays mock-cdp without rewriting `.env`. Recreate APISIX with mock-cdp so token-state DNS is fresh. |
+| 2026-08-17 | P2-07 (live submit), P2-14, P2-15, P1-06 | Public Cloud `go01-obser-de` via local APISIX `:9080`; Knox `sub=ibrooks` | pass | Staged `hdfs:///user/ibrooks/examples/count_to_10.py`; Livy batch `id=2` `state=success` (`application_1786294128788_3137`); Hive `ibrooks.count_to_10` `n` 1..10; `/cdp/hive` 404; `--mint` → `401 invalid_signature`. `pytest tests/test_live_cdp.py tests/test_phase0_inventory.py` 8 passed. No tokens recorded. |

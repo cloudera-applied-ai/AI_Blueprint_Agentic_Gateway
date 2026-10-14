@@ -1,0 +1,256 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import pytest
+import yaml
+
+ROOT = Path(__file__).resolve().parents[1]
+
+
+def test_amp_metadata_is_optional_and_not_launchable() -> None:
+    meta = yaml.safe_load((ROOT / "METADATA.yaml").read_text())
+    assert meta["launchable"] is False
+    assert "Launchable (AMP)" not in meta["catalog_classification"]
+
+    amp = yaml.safe_load((ROOT / ".project-metadata.yaml").read_text())
+    assert amp["name"] == "CDP Agent Gateway"
+    env = amp["environment_variables"]
+    knox_url = env["KNOX_PROXY_URL"]
+    assert knox_url["required"] is True
+    default = knox_url.get("default") or ""
+    assert default.startswith("https://")
+    assert "cdp-proxy-token" in default
+    assert "livy_for_spark3" in default
+    assert "cloudera.site" not in default
+    from agentgateway.project_knox import KNOX_PROXY_PLACEHOLDER
+
+    assert default == KNOX_PROXY_PLACEHOLDER
+    assert not (env["KNOX_JWKS_URL"].get("default") or "").strip()
+    assert "KNOX_TOKEN" not in env
+    assert env["ENABLE_MCP_SPARK"]["default"] == "true"
+    assert env["ENABLE_MCP_HIVE"]["default"] == "true"
+    assert env["ENABLE_MCP_IMPALA"]["default"] == "false"
+    assert env["ENABLE_MCP_SPARK"]["required"] is False
+    assert env["ENABLE_MCP_HIVE"]["required"] is False
+    assert env["ENABLE_MCP_IMPALA"]["required"] is False
+    types = [task["type"] for task in amp["tasks"]]
+    assert types.count("create_job") == 2
+    assert types.count("run_job") == 2
+    fetch_create = next(i for i, task in enumerate(amp["tasks"]) if task.get("type") == "create_job" and task.get("entity_label") == "fetch_jwks")
+    fetch_run = next(i for i, task in enumerate(amp["tasks"]) if task.get("type") == "run_job" and task.get("entity_label") == "fetch_jwks")
+    assert fetch_run == fetch_create + 1
+    smoke_create = next(i for i, task in enumerate(amp["tasks"]) if task.get("type") == "create_job" and task.get("entity_label") == "smoke_knox")
+    smoke_run = next(i for i, task in enumerate(amp["tasks"]) if task.get("type") == "run_job" and task.get("entity_label") == "smoke_knox")
+    assert smoke_run == smoke_create + 1
+    scripts = [task.get("script") for task in amp["tasks"] if "script" in task]
+    assert "0_session-install-dependencies/install_dependencies.py" in scripts
+    assert "1_job-fetch-jwks/fetch_jwks.py" in scripts
+    assert "2_job-smoke-knox/smoke_knox.py" in scripts
+    assert "3_app-mcp-spark/mcp_spark_app.py" in scripts
+    assert "5_app-mcp-hive/mcp_hive_app.py" in scripts
+    assert "6_app-mcp-impala/mcp_impala_app.py" in scripts
+    assert "7_app-agent-gateway/agent_gateway_app.py" in scripts
+    assert "4_app-operator-admin/operator_admin_app.py" in scripts
+
+    kernels = {runtime["kernel"] for runtime in amp["runtimes"]}
+    editors = {runtime["editor"] for runtime in amp["runtimes"]}
+    assert "Python 3.11" in kernels
+    assert "JupyterLab" in editors
+    assert {
+        "editor": "JupyterLab",
+        "kernel": "Python 3.11",
+        "edition": "Standard",
+    } in amp["runtimes"]
+    for runtime in amp["runtimes"]:
+        major, minor = runtime["kernel"].removeprefix("Python ").split(".")
+        assert (int(major), int(minor)) >= (3, 11)
+    for task in amp["tasks"]:
+        if task.get("kernel") != "python3":
+            continue
+        task_kernels = {runtime["kernel"] for runtime in task["runtimes"]}
+        task_editors = {runtime["editor"] for runtime in task["runtimes"]}
+        assert "Python 3.11" in task_kernels
+        assert "Python 3.12" in task_kernels
+        assert "JupyterLab" in task_editors
+        assert task["runtimes"] == amp["runtimes"], task.get("entity_label")
+    install = next(task for task in amp["tasks"] if task.get("script") == "0_session-install-dependencies/install_dependencies.py")
+    assert install["type"] == "run_session"
+    assert install["entity_label"] == "install_deps"
+    assert "cpu" in install and "memory" in install
+    mcp = next(task for task in amp["tasks"] if task.get("subdomain") == "cdp-ag-spark")
+    hive = next(task for task in amp["tasks"] if task.get("subdomain") == "cdp-ag-hive")
+    impala = next(task for task in amp["tasks"] if task.get("subdomain") == "cdp-ag-impala")
+    apisix = next(task for task in amp["tasks"] if task.get("subdomain") == "cdp-ag")
+    admin = next(task for task in amp["tasks"] if task.get("subdomain") == "cdp-ag-admin")
+    assert mcp["type"] == "start_application"
+    assert mcp["kernel"] == "python3"
+    assert mcp["bypass_authentication"] is True
+    assert mcp["static_subdomain"] is True
+    assert hive["bypass_authentication"] is True
+    assert hive["static_subdomain"] is True
+    assert impala["bypass_authentication"] is True
+    assert impala["static_subdomain"] is True
+    assert apisix["type"] == "start_application"
+    assert apisix["bypass_authentication"] is True
+    assert apisix["static_subdomain"] is True
+    assert admin["bypass_authentication"] is False
+    assert admin["static_subdomain"] is True
+    subdomains = [task["subdomain"] for task in amp["tasks"] if "subdomain" in task]
+    assert len(subdomains) == len(set(subdomains))
+    labels = [task.get("entity_label") for task in amp["tasks"] if task.get("entity_label")]
+    assert labels.index("install_deps") < labels.index("fetch_jwks")
+    assert labels.index("fetch_jwks") < labels.index("spark-mcp")
+    assert labels.index("smoke_knox") < labels.index("spark-mcp")
+    assert labels.index("spark-mcp") < labels.index("agent-gateway")
+
+    install_src = (ROOT / "0_session-install-dependencies" / "install_dependencies.py").read_text()
+    assert "--user" in install_src
+    assert '[amp]' in install_src
+    assert "configure_project_knox" in install_src
+    assert "if __name__" not in install_src
+    assert "require_python" in install_src
+
+
+def test_require_python_rejects_old_runtime(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentgateway import cml_boot
+
+    monkeypatch.setattr(cml_boot.sys, "version_info", (3, 10, 14))
+    monkeypatch.setattr(cml_boot.sys, "version", "3.10.14 (default)")
+    with pytest.raises(RuntimeError, match="3.11"):
+        cml_boot.require_python()
+
+
+def test_run_amp_main_does_not_systemexit_in_ipython(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentgateway import cml_boot
+
+    monkeypatch.setenv("CDSW_ENGINE_ID", "test-engine")
+    assert cml_boot.in_ipython() is True
+    assert cml_boot.run_amp_main(lambda: 0) == 0
+
+
+def test_knox_jobs_do_not_raise_systemexit() -> None:
+    fetch = (ROOT / "1_job-fetch-jwks" / "fetch_jwks.py").read_text()
+    smoke = (ROOT / "2_job-smoke-knox" / "smoke_knox.py").read_text()
+    assert "SystemExit" not in fetch
+    assert "SystemExit" not in smoke
+    assert "missing verifying PEM" not in smoke
+    assert "run_amp_main(main)" in fetch
+    assert "run_amp_main(main)" in smoke
+
+
+def test_cml_project_root_does_not_need_caller_file(monkeypatch: pytest.MonkeyPatch) -> None:
+    from agentgateway.cml_boot import project_root
+
+    monkeypatch.chdir(ROOT)
+    monkeypatch.delenv("AGENTGATEWAY_ROOT", raising=False)
+    assert project_root() == ROOT
+
+
+def test_install_script_runs_in_ipython_without_file(monkeypatch) -> None:
+    import subprocess
+
+    monkeypatch.chdir(ROOT)
+    monkeypatch.delenv("AGENTGATEWAY_ROOT", raising=False)
+    monkeypatch.setattr(subprocess, "check_call", lambda *args, **kwargs: None)
+    script = (ROOT / "0_session-install-dependencies" / "install_dependencies.py").read_text()
+    namespace: dict[str, object] = {"__name__": "__main__"}
+    exec(compile(script, "<ipython>", "exec"), namespace)
+    assert namespace["ROOT"] == ROOT
+
+
+def test_amp_layout_and_catalog_exist() -> None:
+    catalog = yaml.safe_load((ROOT / "catalog-entry.yaml").read_text())
+    assert catalog["entries"][0]["label"] == "cdp-agent-gateway"
+    git_url = catalog["entries"][0]["git_url"]
+    assert git_url.startswith("https://github.com/"), git_url
+    assert git_url.endswith(".git"), git_url
+    cover = ROOT / catalog["entries"][0]["image_path"]
+    assert cover.is_file(), cover
+    assert cover.suffix.lower() in {".jpg", ".jpeg", ".png"}
+    for path in (
+        ROOT / "docs" / "amp.md",
+        ROOT / "0_session-install-dependencies" / "install_dependencies.py",
+        ROOT / "1_job-fetch-jwks" / "fetch_jwks.py",
+        ROOT / "2_job-smoke-knox" / "smoke_knox.py",
+        ROOT / "3_app-mcp-spark" / "mcp_spark_app.py",
+        ROOT / "4_app-operator-admin" / "operator_admin_app.py",
+        ROOT / "5_app-mcp-hive" / "mcp_hive_app.py",
+        ROOT / "6_app-mcp-impala" / "mcp_impala_app.py",
+        ROOT / "7_app-agent-gateway" / "agent_gateway_app.py",
+        ROOT / "cml_path.py",
+        ROOT / "src" / "agentgateway" / "knox_jwt.py",
+        ROOT / "src" / "agentgateway" / "amp.py",
+        ROOT / "src" / "agentgateway" / "amp_apisix.py",
+        ROOT / "src" / "agentgateway" / "cml_boot.py",
+    ):
+        assert path.is_file(), path
+
+
+AMP_ENTRYPOINTS = [
+    "3_app-mcp-spark/mcp_spark_app.py",
+    "4_app-operator-admin/operator_admin_app.py",
+    "5_app-mcp-hive/mcp_hive_app.py",
+    "6_app-mcp-impala/mcp_impala_app.py",
+    "7_app-agent-gateway/agent_gateway_app.py",
+]
+
+
+def _code_lines(source: str) -> list[str]:
+    """Drop comments. The prelude carries a '# ... do not use __file__' warning."""
+    return [line for line in source.splitlines() if not line.lstrip().startswith("#")]
+
+
+def test_amp_entrypoint_preludes_are_identical() -> None:
+    preludes = {
+        (ROOT / relative).read_text().split("import cml_path")[0]
+        for relative in AMP_ENTRYPOINTS
+    }
+    assert len(preludes) == 1, "the five CML entrypoint preludes have drifted apart"
+
+
+def test_cml_path_helpers_cover_all_apps() -> None:
+    import cml_path
+
+    assert callable(cml_path.bootstrap)
+    assert callable(cml_path.run_mcp)
+    assert callable(cml_path.run_admin)
+    assert callable(cml_path.run_agent_gateway)
+
+
+@pytest.mark.parametrize("relative", AMP_ENTRYPOINTS)
+def test_amp_entrypoint_boots_without_file_or_port(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: Path, relative: str
+) -> None:
+    """Run the real CML entrypoint the way CML's IPython kernel does.
+
+    No __file__, no CDSW_APP_PORT, every adapter disabled, so it builds the app and
+    returns without binding a socket or needing Knox, a PEM, or impyla.
+    """
+    monkeypatch.chdir(ROOT)
+    monkeypatch.delenv("CDSW_APP_PORT", raising=False)
+    monkeypatch.delenv("AGENTGATEWAY_ROOT", raising=False)
+    monkeypatch.setenv("ENABLE_MCP_SPARK", "false")
+    monkeypatch.setenv("ENABLE_MCP_HIVE", "false")
+    monkeypatch.setenv("ENABLE_MCP_IMPALA", "false")
+    monkeypatch.setenv("ADMIN_BACKEND", "sqlite")
+    monkeypatch.setenv("ADMIN_DB", str(tmp_path / "gateway.sqlite"))
+
+    source = (ROOT / relative).read_text()
+    assert not any("__file__" in line for line in _code_lines(source)), relative
+
+    namespace: dict[str, object] = {"__name__": "amp_entrypoint_under_test"}
+    exec(compile(source, relative, "exec"), namespace)
+    if relative.startswith("7_"):
+        assert callable(namespace["cml_path"].run_agent_gateway)
+    else:
+        assert namespace["app"] is not None
+
+
+def test_amp_adapter_tables_agree() -> None:
+    from agentgateway import amp, cml_boot
+
+    assert set(cml_boot.AMP_EXTRAS) == set(amp._MCP_BUILDERS)
+    assert cml_boot.AMP_EXTRAS["spark"] == "amp"
+    assert cml_boot.AMP_EXTRAS["hive"] == "amp,hive"
+    assert cml_boot.AMP_EXTRAS["impala"] == "amp,hive"

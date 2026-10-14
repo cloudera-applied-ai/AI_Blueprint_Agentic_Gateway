@@ -1,0 +1,44 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 980 300" role="img" aria-labelledby="title desc">
+  <title id="title">CDP Agent Gateway traffic path</title>
+  <desc id="desc">Third-party agents to APISIX to MCP adapters to Apache Knox to Cloudera Data Platform Spark, HDFS WebHDFS staging, Hive, and Impala</desc>
+  <style>
+    .box { fill: #f4f4f5; stroke: #3f3f46; stroke-width: 1.5; }
+    .box-gw { fill: #e4e4e7; stroke: #18181b; stroke-width: 2; }
+    .box-hive { fill: #fafafa; stroke: #71717a; stroke-width: 1.5; stroke-dasharray: 5 4; }
+    .label { font: 600 13px ui-sans-serif, system-ui, sans-serif; fill: #18181b; }
+    .sub { font: 11px ui-sans-serif, system-ui, sans-serif; fill: #52525b; }
+    .arrow { stroke: #52525b; stroke-width: 1.5; fill: none; marker-end: url(#arrow); }
+  </style>
+  <defs>
+    <marker id="arrow" markerWidth="8" markerHeight="8" refX="7" refY="4" orient="auto">
+      <path d="M0,0 L8,4 L0,8 Z" fill="#52525b"/>
+    </marker>
+  </defs>
+  <rect class="box" x="8" y="114" width="150" height="72" rx="6"/>
+  <text class="label" x="83" y="146" text-anchor="middle">3rd-party agents</text>
+  <text class="sub" x="83" y="166" text-anchor="middle">Cursor, Claude, MCP</text>
+  <line class="arrow" x1="158" y1="150" x2="186" y2="150"/>
+  <rect class="box-gw" x="194" y="114" width="150" height="72" rx="6"/>
+  <text class="label" x="269" y="146" text-anchor="middle">Agent Gateway</text>
+  <text class="sub" x="269" y="166" text-anchor="middle">APISIX north-south</text>
+  <line class="arrow" x1="344" y1="150" x2="372" y2="150"/>
+  <rect class="box" x="380" y="114" width="150" height="72" rx="6"/>
+  <text class="label" x="455" y="146" text-anchor="middle">MCP adapters</text>
+  <text class="sub" x="455" y="166" text-anchor="middle">Spark · Hive · Impala</text>
+  <line class="arrow" x1="530" y1="150" x2="558" y2="150"/>
+  <rect class="box" x="566" y="114" width="140" height="72" rx="6"/>
+  <text class="label" x="636" y="146" text-anchor="middle">Apache Knox</text>
+  <text class="sub" x="636" y="166" text-anchor="middle">JWT + Ranger</text>
+  <line class="arrow" x1="706" y1="132" x2="748" y2="52"/>
+  <line class="arrow" x1="706" y1="150" x2="748" y2="150"/>
+  <line class="arrow" x1="706" y1="168" x2="748" y2="248"/>
+  <rect class="box" x="756" y="16" width="208" height="72" rx="6"/>
+  <text class="label" x="860" y="48" text-anchor="middle">CDP Spark</text>
+  <text class="sub" x="860" y="68" text-anchor="middle">Livy · /mcp/spark</text>
+  <rect class="box" x="756" y="114" width="208" height="72" rx="6"/>
+  <text class="label" x="860" y="146" text-anchor="middle">CDP HDFS</text>
+  <text class="sub" x="860" y="166" text-anchor="middle">WebHDFS · /cdp/webhdfs</text>
+  <rect class="box-hive" x="756" y="212" width="208" height="72" rx="6"/>
+  <text class="label" x="860" y="244" text-anchor="middle">CDP Hive / Impala</text>
+  <text class="sub" x="860" y="264" text-anchor="middle">/mcp/hive · /mcp/impala · raw 404</text>
+</svg>

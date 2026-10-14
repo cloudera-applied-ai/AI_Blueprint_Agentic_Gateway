@@ -1,0 +1,45 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "cdp-agent-gateway"
+version = "1.0.0"
+description = "Operator CLI for the CDP Agent Gateway blueprint"
+readme = "README.md"
+license = { file = "LICENSE" }
+requires-python = ">=3.11"
+classifiers = [
+  "License :: OSI Approved :: Apache Software License",
+  "Programming Language :: Python :: 3",
+  "Programming Language :: Python :: 3.11",
+  "Programming Language :: Python :: 3.12",
+  "Programming Language :: Python :: 3.13",
+]
+dependencies = [
+  "httpx",
+  "PyJWT",
+  "cryptography",
+  "python-dotenv",
+  "PyYAML",
+]
+
+[project.optional-dependencies]
+dev = ["pytest", "httpx", "starlette", "uvicorn"]
+amp = ["starlette", "uvicorn"]
+mcp = ["httpx", "starlette", "uvicorn"]
+admin = ["starlette", "uvicorn"]
+hive = ["impyla>=0.19"]
+langgraph = [
+  "langgraph>=0.3.5,<0.4",
+  "langchain-core>=0.3.85,<0.4",
+  "langchain-openai>=0.3,<0.4",
+  "langchain-anthropic>=0.3,<0.4",
+]
+
+[project.scripts]
+gateway = "agentgateway.cli:main"
+ag = "agentgateway.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]

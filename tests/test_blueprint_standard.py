@@ -1,0 +1,143 @@
+from __future__ import annotations
+
+from pathlib import Path
+
+import yaml
+
+ROOT = Path(__file__).resolve().parents[1]
+
+REQUIRED_README_HEADINGS = [
+    "## Overview",
+    "## Demo",
+    "## Use Case",
+    "## Key Features",
+    "## Quickstart",
+    "## Architecture / Software Components",
+    "## Target Audience",
+    "## Repository Structure",
+    "## Prerequisites",
+    "## Hardware Requirements",
+    "## Documentation",
+]
+
+REQUIRED_METADATA_KEYS = [
+    "name",
+    "slug",
+    "description",
+    "reprise_link",
+    "catalog_classification",
+    "launchable",
+    "lifecycle_status",
+    "industry",
+    "industry_alignment",
+    "tags",
+    "product_mapping",
+    "publisher",
+    "source",
+    "public_github_link",
+    "maintainer_name",
+    "date_created",
+    "date_updated",
+    "published_date",
+]
+
+
+def test_readme_has_blueprint_standard_sections() -> None:
+    text = (ROOT / "README.md").read_text()
+    assert text.startswith("# Cloudera Blueprint:")
+    for heading in REQUIRED_README_HEADINGS:
+        assert heading in text, f"README missing required section {heading}"
+    assert "images/" in text
+    assert "deploy/" in text
+    assert "METADATA.yaml" in text
+    assert "docs/amp.md" in text
+    assert "docs/spark.md" in text
+    assert "docs/hive.md" in text
+    assert "docs/impala.md" in text or "docs/impala" in text
+    assert "/mcp/spark" in text
+    assert "/mcp/hive" in text
+    assert "/mcp/impala" in text
+    assert "127.0.0.1:9090" in text or "localhost `:9090`" in text
+
+
+def test_metadata_yaml_has_catalog_fields() -> None:
+    meta = yaml.safe_load((ROOT / "METADATA.yaml").read_text())
+    for key in REQUIRED_METADATA_KEYS:
+        assert key in meta, f"METADATA.yaml missing {key}"
+    assert meta["name"]
+    assert meta["slug"] == "cdp-agent-gateway"
+    assert meta["catalog_classification"]
+    assert "Enterprise Blueprint" in meta["catalog_classification"]
+    assert meta["launchable"] is False
+    assert meta["lifecycle_status"] == "Active"
+    assert "Cloudera Data Platform" in meta["product_mapping"]
+    assert "agents" in meta["tags"]
+    assert "spark" in meta["tags"]
+    assert "hive" in meta["tags"]
+    assert "impala" in meta["tags"]
+    assert "Cloudera Data Engineering" in meta["product_mapping"]
+
+
+def test_dockerfiles_use_python_311_or_greater() -> None:
+    import re
+
+    for path in (
+        ROOT / "mock-cdp" / "Dockerfile",
+        ROOT / "mcp-spark" / "Dockerfile",
+        ROOT / "mcp-hive" / "Dockerfile",
+        ROOT / "mcp-impala" / "Dockerfile",
+        ROOT / "admin" / "Dockerfile",
+    ):
+        text = path.read_text()
+        match = re.search(r"PYTHON_VERSION=(\d+)\.(\d+)", text)
+        assert match, f"{path.name} must pin PYTHON_VERSION"
+        assert (int(match.group(1)), int(match.group(2))) >= (3, 11)
+
+
+def test_service_deps_live_in_pyproject_extras() -> None:
+    import tomllib
+
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text())
+    extras = data["project"]["optional-dependencies"]
+    assert "httpx" in extras["mcp"]
+    assert "starlette" in extras["mcp"]
+    assert "uvicorn" in extras["mcp"]
+    assert "starlette" in extras["admin"]
+    assert "uvicorn" in extras["admin"]
+    assert any(item.startswith("impyla") for item in extras["hive"])
+    for relative in (
+        "mcp-spark/requirements.txt",
+        "mcp-hive/requirements.txt",
+        "mcp-impala/requirements.txt",
+        "admin/requirements.txt",
+        "tests/requirements.txt",
+    ):
+        assert not (ROOT / relative).exists(), relative
+    assert '".[mcp]"' in (ROOT / "mcp-spark" / "Dockerfile").read_text()
+    assert '".[mcp,hive]"' in (ROOT / "mcp-hive" / "Dockerfile").read_text()
+    assert '".[mcp,hive]"' in (ROOT / "mcp-impala" / "Dockerfile").read_text()
+    assert '".[admin]"' in (ROOT / "admin" / "Dockerfile").read_text()
+
+
+def test_blueprint_layout_dirs_exist() -> None:
+    for path in (
+        ROOT / "images" / "architecture.svg",
+        ROOT / "deploy" / "docker-compose.yml",
+        ROOT / "docs" / "architecture.md",
+        ROOT / "mcp-spark" / "mcp_spark_server.py",
+        ROOT / "mcp-hive" / "mcp_hive_server.py",
+        ROOT / "mcp-impala" / "mcp_impala_server.py",
+        ROOT / "admin" / "operator_admin_server.py",
+        ROOT / "examples" / "spark" / "count_to_10.py",
+        ROOT / "examples" / "hive" / "README.md",
+        ROOT / "examples" / "impala" / "README.md",
+        ROOT / "docs" / "operator-cli.md",
+        ROOT / "docs" / "spark.md",
+        ROOT / "docs" / "hive.md",
+        ROOT / "docs" / "impala.md",
+        ROOT / "docs" / "amp.md",
+        ROOT / ".project-metadata.yaml",
+        ROOT / "catalog-entry.yaml",
+        ROOT / "METADATA.yaml",
+    ):
+        assert path.exists(), f"missing blueprint path {path.relative_to(ROOT)}"
